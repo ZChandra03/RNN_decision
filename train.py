@@ -34,7 +34,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 # --- Training Loop ---
 EPOCHS = 4000
 
-beta = 1e-6                     # L2 coeff for rates :contentReference[oaicite:2]{index=2}&#8203;:contentReference[oaicite:3]{index=3}
+beta = 1e-6                     # L2 coeff for rates 
 for epoch in range(EPOCHS):
     model.train()
     optimizer.zero_grad()

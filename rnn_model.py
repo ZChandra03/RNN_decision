@@ -49,7 +49,7 @@ class CustomRNN(nn.Module):
         for t in range(tdim):
             # 1) noise term (scaled per discretized OU process)
             noise = torch.randn(batch_size, self.N, device=x.device) \
-                    * SIGMA_REC * np.sqrt(2 * ALPHA)
+                    * SIGMA_REC * np.sqrt(2 / ALPHA)
 
             # 2) input drive at time t
             input_t = torch.matmul(x[:, t, :], self.W_in.T)

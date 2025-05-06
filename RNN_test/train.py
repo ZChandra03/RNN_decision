@@ -15,8 +15,8 @@ config = {
     'tone_dur': 20,
     'delay': 750,
     'loss_type': 'mean_squared_error',
-    'sigma_x': 0.1,
-    'alpha': 1.0
+    'sigma_x': 0.005,
+    'alpha': 0.2
 }
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +29,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- Initialize Model ---
 model = CustomRNN(n_input=config['n_input'], n_output=config['n_output']).to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(
+    filter(lambda p: p.requires_grad, model.parameters()),
+    lr=0.001
+    )
 
 # --- Training Loop ---
 EPOCHS = 4000
@@ -60,6 +63,22 @@ for epoch in range(EPOCHS):
     optimizer.step()
 
     if epoch % 100 == 0:
-        print(f"Epoch {epoch}, Loss: {loss.item():.6f}")
+        # --- compute classification accuracy ---
+        with torch.no_grad():
+            # Ground truth: "long" trials have a nonzero target during the response epoch
+            # y_train shape: [batch, time, 1]
+            # sum over time to flag any nonzero → True for long trials
+            gt = (y_train.sum(dim=1) > 0).squeeze(1)      # shape [batch]
+
+            # Model output shape: [batch, time, 1] → remove last dim
+            out = output.squeeze(-1)                     # shape [batch, time]
+
+            # Predict "long" if output ever crosses the 0.5 threshold
+            pred = (out > 0.5).any(dim=1)                # shape [batch]
+
+            # Accuracy = fraction of correct predictions
+            acc = (pred == gt).float().mean().item()
+
+        print(f"Epoch {epoch}, Loss: {loss.item():.6f}, Acc: {acc:.3f}")
 
 print("Training Complete.")

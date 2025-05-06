@@ -1,5 +1,4 @@
 # rnn_model.py
-
 import torch
 import torch.nn as nn
 import numpy as np
@@ -13,7 +12,7 @@ SIGMA_REC = 0.05
 
 class CustomRNN(nn.Module):
     def __init__(self, n_input, n_output):
-        super(CustomRNN, self).__init__()
+        super().__init__()
         self.N = N_REC
         self.n_input = n_input
         self.n_output = n_output
@@ -39,43 +38,36 @@ class CustomRNN(nn.Module):
         W_rec = D.view(-1, 1) * A * torch.abs(W_ortho)
         return W_rec
 
-    def forward(self, x, return_hidden=False):
+    def forward(self, x):
+        """
+        x: [batch, tdim, n_input]
+        returns: out [batch, tdim, n_output], l2_rates (scalar)
+        """
         batch_size, tdim, _ = x.shape
-        # initialize rates to zero
-        r = torch.zeros(batch_size, self.N, device=x.device)
-        outputs = []
-        hidden_hist = [] if return_hidden else None
+        device = x.device
 
-        for t in range(tdim):
-            # 1) noise term (scaled per discretized OU process)
-            noise = torch.randn(batch_size, self.N, device=x.device) \
+        # initialize rates to zero
+        r = torch.zeros(batch_size, self.N, device=device)
+
+        # pre-sample noise for all time steps
+        noise_seq = torch.randn(batch_size, tdim, self.N, device=device) \
                     * SIGMA_REC * np.sqrt(2 / ALPHA)
 
-            # 2) input drive at time t
-            input_t = torch.matmul(x[:, t, :], self.W_in.T)
+        outputs = []
+        l2_accum = 0.0
 
-            # 3) Euler‐update of rates with ReLU nonlinearity
-            r = (1 - ALPHA) * r + ALPHA * torch.relu(
-                    torch.matmul(r, self.W_rec.T)
-                    + input_t
-                    + self.bias
-                    + noise
-                )
-
-            # 4) linear readout
+        for t in range(tdim):
+            noise = noise_seq[:, t, :]
+            # input drive
+            input_t = x[:, t, :] @ self.W_in.T
+            # Euler update with ReLU
+            r = (1 - ALPHA) * r + ALPHA * torch.relu(r @ self.W_rec.T + input_t + self.bias + noise)
+            # output
             z = self.W_out(r)
             outputs.append(z.unsqueeze(1))
-
-            # optionally record hidden state
-            if return_hidden:
-                hidden_hist.append(r)
+            # accumulate L2 of rates
+            l2_accum += (r ** 2).mean()
 
         out = torch.cat(outputs, dim=1)  # [batch, tdim, n_output]
-
-        if return_hidden:
-            # stack into [batch, tdim, N]
-            rates = torch.stack(hidden_hist, dim=1)
-            return out, rates
-        else:
-            return out
-
+        l2_rates = l2_accum / tdim  # average over time steps
+        return out, l2_rates

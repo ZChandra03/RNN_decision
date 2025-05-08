@@ -137,8 +137,8 @@ def interval_discrim(config, mode):
         int1_ons = np.full(dataset_size, 500 / dt).astype(int)
         int2_ons = np.full(dataset_size, 1750 / dt).astype(int)
     elif mode == 'random_delay':
-        # comp_dur = rng.choice((50, 100, 150, 250, 300, 350), dataset_size)
-        comp_dur = rng.choice((120, 160, 180, 190, 210, 220, 240, 280), dataset_size)
+        comp_dur = rng.choice((50, 100, 150, 250, 300, 350), dataset_size)
+        #comp_dur = rng.choice((120, 160, 180, 190, 210, 220, 240, 280), dataset_size)
         std_order = rng.choice([0, 1], dataset_size, p=[0.5, 0.5])  # 0 = std comes first, 1 = std comes second
         int1_offs, int2_ons, int2_offs, respond = np.zeros(dataset_size, dtype=int), np.zeros(dataset_size,
                                                                                               dtype=int), np.zeros(

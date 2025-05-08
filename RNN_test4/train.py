@@ -30,7 +30,7 @@ def get_default_hp():
         'dt': 10,
         'ei_cell_ratio': 0.8,
         'epochs': 4000,
-        'learning_rate': 5e-4,
+        'learning_rate': 1e-3,
         'loss_type': 'mse',
         'L1_activity': 0.,
         'L2_activity': 1e-6,
@@ -44,7 +44,7 @@ def get_default_hp():
         'sigma_x': 5e-3,
         'std_dur': 200,
         'tone_dur': 20,
-        'target_loss': 5e-3,
+        'target_loss': 5e-2,
         'train_bias_rec': False,
         'train_w_in': False,
         'validation_split': 0.,
@@ -185,8 +185,8 @@ def run():
     for exp in range(numExp):
         seed = SeedBase + exp
         for rule in rule_list:
-            seed_name = f'PT_{seed}_{rule}_bs_10'
-            #seed_name = f'easy_trained'
+            #seed_name = f'PT_{seed}_{rule}_bs_10'
+            seed_name = f'easy_trained'
             train(seed_name, rule, seed, checkpoint_suffix, hp_override={'batch_size': 10})
 
 # -----------------------------------------------------------------------------

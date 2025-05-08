@@ -108,7 +108,7 @@ def plot_activation_heatmap(mean_pos: np.ndarray, mean_neg: np.ndarray,
 # -----------------------------------------------------------------------------
 
 def main():
-    model_dir = os.path.join(BASE_DIR, "models", "easy_trained")
+    model_dir = os.path.join(BASE_DIR, "models", "hard_trained")
     dataset_size = 1000
     top          = 20
     out          = "selectivityEasyTask1.png"
@@ -131,7 +131,7 @@ def main():
         activation=(mean_pos + mean_neg) / 2.0    # or save both mean_pos & mean_neg separately if you like
     )
     print(f"[INFO] Saved analysis results to {results_path}")
-    
+
     plot_si(si, out_path, model_name, top=top)
     plot_activation_heatmap(mean_pos, mean_neg, si, out_path, model_name)
 

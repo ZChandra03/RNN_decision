@@ -112,8 +112,8 @@ def interval_discrim(config, mode):
 
     # Experimental modes
     if mode == 'random' or mode == 'remove_first' or mode == 'remove_second' or mode == 'go_cue':
-        comp_dur = rng.choice((50, 100, 150, 250, 300, 350), dataset_size)
-        #comp_dur = rng.choice((120, 160, 180, 190, 210, 220, 240, 280), dataset_size)
+        #comp_dur = rng.choice((50, 100, 150, 250, 300, 350), dataset_size)
+        comp_dur = rng.choice((120, 160, 180, 190, 210, 220, 240, 280), dataset_size)
         std_order = rng.choice([0, 1], dataset_size, p=[0.5, 0.5])  # 0 = std comes first, 1 = std comes second
         int1_offs, int2_ons, int2_offs, respond = np.zeros(dataset_size, dtype=int), np.zeros(dataset_size,
                                                                                               dtype=int), np.zeros(

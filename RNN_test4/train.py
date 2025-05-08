@@ -30,7 +30,7 @@ def get_default_hp():
         'dt': 10,
         'ei_cell_ratio': 0.8,
         'epochs': 4000,
-        'learning_rate': 1e-3,
+        'learning_rate': 5e-4,
         'loss_type': 'mse',
         'L1_activity': 0.,
         'L2_activity': 1e-6,
@@ -150,7 +150,7 @@ def train(seed_name, rule, seed, checkpoint_suffix='', hp_override=None, reload_
         times.append(time.time() - epoch_start)
 
         # logging
-        if (epoch) % 20 == 0:
+        if (epoch) % 10 == 0:
             print(f"Epoch {epoch:4d} | Loss: {epoch_loss:.6f}")
 
         # checkpoint
@@ -176,11 +176,6 @@ def train(seed_name, rule, seed, checkpoint_suffix='', hp_override=None, reload_
 
     print(f"Training finished. Best loss = {best_loss:.6f}")
 
-# -----------------------------------------------------------------------------
-# main.py equivalent – experiment launcher
-# -----------------------------------------------------------------------------
-
-
 def run():
     numExp = 1
     SeedBase = 100
@@ -190,8 +185,8 @@ def run():
     for exp in range(numExp):
         seed = SeedBase + exp
         for rule in rule_list:
-            #seed_name = f'PT_{seed}_{rule}_bs_10'
-            seed_name = f'easy_trained'
+            seed_name = f'PT_{seed}_{rule}_bs_10'
+            #seed_name = f'easy_trained'
             train(seed_name, rule, seed, checkpoint_suffix, hp_override={'batch_size': 10})
 
 # -----------------------------------------------------------------------------

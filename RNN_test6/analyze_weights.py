@@ -113,8 +113,8 @@ def save_raw_data(model_name, w_ex, w_inh, ei_vec, degree, sel, act, eigs):
 
 if __name__ == '__main__':
     # Configuration
-    model_dir = os.path.join(BASE_DIR, 'models', 'hard_trained')
-    results_path = os.path.join(BASE_DIR, "results_hard_trained.npz")
+    model_dir = os.path.join(BASE_DIR, 'models', 'easy_trained')
+    results_path = os.path.join(BASE_DIR, "results_easy_trained.npz")
     model_name = os.path.basename(model_dir)
 
     print(f'[INFO] Loading model from {model_dir}')

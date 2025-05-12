@@ -31,7 +31,7 @@ def load_model(model_dir: str) -> Tuple[RNNModel, dict]:
 
 
 def make_validation_batch(hp: dict, size: int, comp_step: int = 20):
-    """Generate a fresh batch with input noise and return tensors + meta + labels + mask for MSE loss."""
+    """Generate a fresh batch with input noise and return tensors + meta + labels + mask."""
     hp_val = hp.copy()
     hp_val["dataset_size"] = size
     hp_val["comp_step"] = comp_step
@@ -41,15 +41,16 @@ def make_validation_batch(hp: dict, size: int, comp_step: int = 20):
     c_mask = torch.tensor(trial.c_mask[:, :, 0:1], dtype=torch.float32)
     decision_mask = torch.tensor(trial.c_mask[:, :, 0] == 2, dtype=torch.bool)
     labels = torch.tensor(trial.respond, dtype=torch.bool)
-    return x, decision_mask, labels, y, c_mask
+    int2_ons = torch.tensor(trial.int2_ons, dtype=torch.long)
+    return x, decision_mask, labels, y, c_mask, int2_ons
 
 # -----------------------------------------------------------------------------
-# Selectivity & activation computation
+# d-prime selectivity & activation computation
 # -----------------------------------------------------------------------------
 
 def selectivity_by_decision(model: RNNModel, x: torch.Tensor, mask: torch.BoolTensor,
-                             labels: torch.BoolTensor):
-    """Return SI per hidden unit and mean activities for each class."""
+                             labels: torch.BoolTensor) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute d' per hidden unit and mean activations for each class."""
     with torch.no_grad():
         h = model.rnn(x.to(DEVICE))            # (B, T, N)
         h = h.cpu()
@@ -60,32 +61,39 @@ def selectivity_by_decision(model: RNNModel, x: torch.Tensor, mask: torch.BoolTe
 
     pos = labels
     neg = ~labels
-    mean_pos = h_dec[pos].mean(dim=0)
-    mean_neg = h_dec[neg].mean(dim=0)
+    resp_pos = h_dec[pos]    # (n_pos, N)
+    resp_neg = h_dec[neg]    # (n_neg, N)
 
-    si = (mean_pos - mean_neg) / (mean_pos + mean_neg + EPS)
-    return si.numpy(), mean_pos.numpy(), mean_neg.numpy()
+    mean_pos = resp_pos.mean(dim=0)
+    mean_neg = resp_neg.mean(dim=0)
+    sigma_pos = resp_pos.std(dim=0, unbiased=True)
+    sigma_neg = resp_neg.std(dim=0, unbiased=True)
+
+    pooled_std = torch.sqrt(0.5 * (sigma_pos**2 + sigma_neg**2))
+    dprime = (mean_pos - mean_neg) / (pooled_std + EPS)
+
+    return dprime.numpy(), mean_pos.numpy(), mean_neg.numpy()
 
 # -----------------------------------------------------------------------------
 # Plotting helpers
 # -----------------------------------------------------------------------------
 
-def plot_si(si: np.ndarray, out_path: str, model_name: str, top: int = 20):
-    idx = np.argsort(-np.abs(si))
-    sorted_si = si[idx]
+def plot_dprime(dp: np.ndarray, out_path: str, model_name: str, top: int = 20):
+    idx = np.argsort(-np.abs(dp))
+    sorted_dp = dp[idx]
     plt.figure(figsize=(10, 4))
-    plt.bar(range(len(sorted_si)), sorted_si, width=1.0)
-    plt.xlabel("Neuron (sorted by |SI|)")
-    plt.ylabel("Selectivity Index")
-    plt.title(f"Hidden-unit decision selectivity ({model_name})")
+    plt.bar(range(len(sorted_dp)), sorted_dp, width=1.0)
+    plt.xlabel("Neuron (sorted by |d′|)")
+    plt.ylabel("d′ (d-prime)")
+    plt.title(f"Hidden-unit decision d' ({model_name})")
     plt.tight_layout()
     plt.savefig(out_path, dpi=300)
     plt.close()
 
 
 def plot_activation_heatmap(mean_pos: np.ndarray, mean_neg: np.ndarray,
-                            si: np.ndarray, out_path: str, model_name: str):
-    idx = np.argsort(-np.abs(si))
+                            dp: np.ndarray, out_path: str, model_name: str):
+    idx = np.argsort(-np.abs(dp))
     data = np.vstack([mean_pos[idx], mean_neg[idx]])  # (2, N)
 
     fig, ax = plt.subplots(figsize=(10, 2))
@@ -111,53 +119,57 @@ def main():
     model_dir = os.path.join(BASE_DIR, "models", "easy_trained")
     dataset_size = 1000
     top          = 20
-    comp_step    = 30
-    out          = "selectivityEasyTask1.png"
+    comp_step    = 10
+    out          = "dprimeEasyTask1.png"
     model_name   = os.path.basename(model_dir.rstrip(os.sep))
     base_name    = os.path.splitext(out)[0]
     out_filename = f"{base_name}_{model_name}.png"
     out_path     = os.path.join(BASE_DIR, out_filename)
 
     model, hp = load_model(model_dir)
-    x, mask, labels, y_batch, c_mask_batch = make_validation_batch(hp, dataset_size, comp_step)
+    x, mask, labels, y_batch, c_mask_batch, int2_ons = make_validation_batch(hp, dataset_size, comp_step)
 
-    si, mean_pos, mean_neg = selectivity_by_decision(model, x, mask, labels)
+    dp, mean_pos, mean_neg = selectivity_by_decision(model, x, mask, labels)
 
-    # ─── Save selectivity & activation arrays for downstream weight analysis ───
+    # ─── Save d-prime & activation arrays for downstream analysis ───
     results_fname = f"results_{model_name}.npz"
     results_path  = os.path.join(BASE_DIR, results_fname)
     np.savez(
         results_path,
-        selectivity=si,
+        dprime=dp,
         activation=(mean_pos + mean_neg) / 2.0
     )
     print(f"[INFO] Saved analysis results to {results_path}")
 
-    plot_si(si, out_path, model_name, top=top)
-    plot_activation_heatmap(mean_pos, mean_neg, si, out_path, model_name)
+    plot_dprime(dp, out_path, model_name, top=top)
+    plot_activation_heatmap(mean_pos, mean_neg, dp, out_path, model_name)
 
-    # ─── Print activations for the top‐N selective neurons ───────────────
-    idx = np.argsort(-np.abs(si))
-
-    # ------------------ Confusion matrix ------------------
+    # ─── Confusion matrix & validation loss ───
     with torch.no_grad():
         y_hat = model(x.to(DEVICE))
+
     out_tensor = y_hat.cpu().squeeze(-1)
-    dec_output = (out_tensor * mask.float()).sum(dim=1) / mask.float().sum(dim=1)
-    #print((out_tensor * mask.float())[:1, :])
-    preds = dec_output > 0.4          # threshold halfway between 0.05 and 0.8
-    trues = labels.numpy()
-    TP = np.logical_and(preds,  trues).sum()
-    TN = np.logical_and(~preds, ~trues).sum()
-    FP = np.logical_and(preds, ~trues).sum()
-    FN = np.logical_and(~preds,  trues).sum()
-    print("Confusion matrix:")
-    print(f"  TP: {TP}  FP: {FP}")
-    print(f"  FN: {FN}  TN: {TN}")
+    thresh = 0.4
+    fired = out_tensor > thresh
+    resp_trials = labels
+    nonresp_trials = ~labels
+    fired_any = fired.any(dim=1)
 
-    print(f"All plots saved based on base name '{out_path}'")
+    T = fired.size(1)
+    time_idx = torch.arange(T, device=fired.device).unsqueeze(0)
+    epoch_mask = time_idx >= int2_ons.unsqueeze(1)
+    fired_in_epoch  = (fired & epoch_mask).any(dim=1)
+    fired_out_epoch = (fired & ~epoch_mask).any(dim=1)
 
-    # ------------------ Validation MSE loss ------------------
+    TP = (resp_trials & fired_in_epoch & ~fired_out_epoch).sum().item()
+    FN = (resp_trials & (~fired_in_epoch | fired_out_epoch)).sum().item()
+    FP = (nonresp_trials & fired_any).sum().item()
+    TN = (nonresp_trials & ~fired_any).sum().item()
+
+    print(f"Confusion matrix:  TP: {TP}  FP: {FP}  FN: {FN}  TN: {TN}")
+    percent_correct = ((TP + TN) / dataset_size) * 100
+    print(f"Overall accuracy: {percent_correct:.2f}%")
+
     loss = mse_loss_with_mask(y_hat, y_batch.to(DEVICE), c_mask_batch.to(DEVICE))
     print(f"Validation MSE loss: {loss.item():.6f}")
 

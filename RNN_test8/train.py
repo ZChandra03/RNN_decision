@@ -187,7 +187,7 @@ def train(seed_name, rule, seed, checkpoint_suffix='', hp_override=None, reload_
     print(f"Training finished. Best loss = {best_loss:.6f}")
 
 def run():
-    numExp = 1
+    numExp = 50
     SeedBase = 100
     rule_list = ['Interval_Discrim']
     checkpoint_suffix = 'checkpoint.pt'
@@ -195,8 +195,8 @@ def run():
     for exp in range(numExp):
         seed = SeedBase + exp
         for rule in rule_list:
-            #seed_name = f'PT_{seed}_{rule}_bs_10'
-            seed_name = f'easy_trained1'
+            seed_name = f'seed_{seed}'
+            #seed_name = f'easy_trained1'
             train(seed_name, rule, seed, checkpoint_suffix, hp_override={'batch_size': 10})
 
 # -----------------------------------------------------------------------------

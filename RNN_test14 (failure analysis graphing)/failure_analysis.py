@@ -10,7 +10,7 @@ from task import generate_trials
 # ─── Configuration ────────────────────────────────────────────────────────────
 BASE_DIR    = os.path.abspath(os.path.dirname(__file__))
 MODEL_DIR   = os.path.join(BASE_DIR, "models", "easy_trained")
-OUTPUT_DIR  = os.path.join(BASE_DIR, "confusion_analysis_figure")
+OUTPUT_DIR  = os.path.join(BASE_DIR, "figures")
 BATCH_SIZE  = 10000     # trials per batch
 THRESHOLD   = 0.4       # decision threshold on output unit
 NUM_SAMPLES = 4         # examples per category

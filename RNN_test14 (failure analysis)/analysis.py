@@ -132,14 +132,14 @@ def main():
     dp, mean_pos, mean_neg = selectivity_by_decision(model, x, mask, labels)
 
     # ─── Save d-prime & activation arrays for downstream analysis ───
-    results_fname = f"results_{model_name}.npz"
-    results_path  = os.path.join(BASE_DIR, results_fname)
-    np.savez(
-        results_path,
-        dprime=dp,
-        activation=(mean_pos + mean_neg) / 2.0
-    )
-    print(f"[INFO] Saved analysis results to {results_path}")
+    # results_fname = f"results_{model_name}.npz"
+    # results_path  = os.path.join(BASE_DIR, results_fname)
+    # np.savez(
+    #     results_path,
+    #     dprime=dp,
+    #     activation=(mean_pos + mean_neg) / 2.0
+    # )
+    # print(f"[INFO] Saved analysis results to {results_path}")
 
     plot_dprime(dp, out_path, model_name, top=top)
     plot_activation_heatmap(mean_pos, mean_neg, dp, out_path, model_name)

@@ -11,7 +11,7 @@ from task import generate_trials
 BASE_DIR    = os.path.abspath(os.path.dirname(__file__))
 MODEL_DIR   = os.path.join(BASE_DIR, "models", "easy_trained")
 OUTPUT_DIR  = os.path.join(BASE_DIR, "confusion_analysis_figure")
-BATCH_SIZE  = 10000     # total trials to sample for computing TP, FP, etc.
+BATCH_SIZE  = 15000     # total trials to sample for computing TP, FP, etc.
 THRESHOLD   = 0.4       # decision threshold on output unit
 NUM_SAMPLES = 4         # samples per category
 
@@ -69,70 +69,72 @@ if __name__ == "__main__":
     x, responds, int2_ons = make_validation_batch(hp, BATCH_SIZE)
     TP, FP, FN, TN, all_y = classify_trials(model, x, responds, int2_ons, THRESHOLD)
 
-    # pick one sample per category
+    # sample multiple indices per category
     rng = np.random.RandomState(42)
     categories = {'TP': TP, 'FP': FP, 'FN': FN, 'TN': TN}
     chosen = {}
     for cat, mask in categories.items():
         idxs = np.where(mask.numpy())[0]
-        if len(idxs) > 0:
-            chosen_idx = rng.choice(idxs, min(NUM_SAMPLES, len(idxs)), replace=False)[0]
-            chosen[cat] = chosen_idx
+        if len(idxs) >= NUM_SAMPLES:
+            chosen[cat] = rng.choice(idxs, NUM_SAMPLES, replace=False)
         else:
-            print(f"No examples of {cat} found.")
+            chosen[cat] = idxs  # whatever is available
+            print(f"Only {len(idxs)} examples of {cat} found.")
 
-    # determine fixed neuron order based on TP trial
-    tp_idx = chosen.get('TP')
-    xt_tp = x[tp_idx:tp_idx+1].to(DEVICE)
+    # determine fixed neuron order based on the very first TP trial
+    if len(chosen['TP']) == 0:
+        raise RuntimeError("No TP trials found; cannot lock sorting order.")
+    ref_idx = chosen['TP'][0]
+    xt_ref = x[ref_idx:ref_idx+1].to(DEVICE)
     with torch.no_grad():
-        h_tp = model.rnn(xt_tp)           # (1, T, N)
-    h_arr_tp = h_tp.cpu().numpy()[0].T   # (N, T)
-    peaks_tp = h_arr_tp.argmax(axis=1)
-    order = np.argsort(peaks_tp)
+        h_ref = model.rnn(xt_ref)           # (1, T, N)
+    h_arr_ref = h_ref.cpu().numpy()[0].T   # (N, T)
+    peaks_ref = h_arr_ref.argmax(axis=1)
+    order = np.argsort(peaks_ref)
 
-    # prepare figure
-    n_cat = len(chosen)
+    # plotting parameters
     dt_ms = hp.get('dt', 10)
-    fig, axes = plt.subplots(2, n_cat, figsize=(12, 6),
-                             gridspec_kw={"height_ratios": [3, 1], "hspace": 0.25})
+    times = np.arange(h_arr_ref.shape[1]) * (dt_ms / 1000.0)
 
-    for i, (cat, idx) in enumerate(chosen.items()):
-        # hidden activations
-        xt = x[idx:idx+1].to(DEVICE)
-        with torch.no_grad():
-            h_seq = model.rnn(xt)
-        h_arr = h_seq.cpu().numpy()[0].T     # (N, T)
+    # create one figure per category
+    for cat, idx_list in chosen.items():
+        n = len(idx_list)
+        fig, axes = plt.subplots(2, n, figsize=(4*n, 4),
+                                 gridspec_kw={"height_ratios": [3, 1], "hspace": 0.3, "wspace": 0.3})
 
-        # apply fixed order and clip negatives
-        h_sorted = h_arr[order]
-        h_clipped = np.clip(h_sorted, 0, None)
+        for j, idx in enumerate(idx_list):
+            # hidden activations
+            xt = x[idx:idx+1].to(DEVICE)
+            with torch.no_grad():
+                h_seq = model.rnn(xt)
+            h_arr = h_seq.cpu().numpy()[0].T       # (N, T)
+            h_sorted = np.clip(h_arr[order], 0, None)
 
-        T = h_arr.shape[1]
-        times = np.arange(T) * (dt_ms / 1000.0)
+            im = axes[0, j].imshow(h_sorted, aspect='auto', cmap='viridis',
+                                   vmin=0, vmax=1,
+                                   extent=[times[0], times[-1], 0, h_sorted.shape[0]])
+            axes[0, j].set_title(f"{cat} #{idx}", fontsize=9)
+            axes[0, j].set_xlim(times[[0, -1]])
+            if j == 0:
+                axes[0, j].set_ylabel("Units")
 
-        im = axes[0, i].imshow(h_clipped, aspect='auto', cmap='viridis',
-                               vmin=0, vmax=1,
-                               extent=[times[0], times[-1], 0, h_clipped.shape[0]])
-        axes[0, i].set_title(f"{cat}", fontsize=10)
-        axes[0, i].set_ylabel("Active Units")
-        axes[0, i].set_xlim([times[0], times[-1]])
+            # output trace
+            y_hat = all_y[idx]
+            axes[1, j].plot(times, y_hat, linewidth=1.5)
+            axes[1, j].set_xlim(times[[0, -1]])
+            axes[1, j].set_ylim([-0.05, 1.05])
+            axes[1, j].axhline(THRESHOLD, color='gray', linestyle='--', linewidth=1)
+            if j == 0:
+                axes[1, j].set_ylabel("Output")
 
-        # output trace
-        y_hat = all_y[idx]
-        axes[1, i].plot(times, y_hat, linewidth=2)
-        axes[1, i].set_xlabel("Time (s)")
-        axes[1, i].set_ylabel("Output")
-        axes[1, i].set_ylim([-0.05, 1.05])
-        axes[1, i].set_xlim([times[0], times[-1]])
-        axes[1, i].axhline(0, color='k', linewidth=0.5)
+        # shared colorbar at right
+        cbar = fig.colorbar(im, ax=axes[0, :].tolist(), orientation='vertical', shrink=0.8)
+        cbar.set_label("Activity", rotation=270, labelpad=12)
 
-    # shared colorbar
-    cbar = fig.colorbar(im, ax=axes[0, :].tolist(), orientation='vertical', shrink=0.8)
-    cbar.set_label("Activity (clipped & saturated)", rotation=270, labelpad=15)
+        fig.suptitle(f"{cat} Examples (n={n})", fontsize=14)
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
 
-    fig.suptitle("Failure Analysis: Hidden States and Outputs", fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
-    save_path = os.path.join(OUTPUT_DIR, "failure_analysis_figure.png")
-    fig.savefig(save_path, dpi=300)
-    print(f"Figure saved to {save_path}")
-    plt.show()
+        save_path = os.path.join(OUTPUT_DIR, f"failure_analysis_{cat}.png")
+        fig.savefig(save_path, dpi=300)
+        print(f"Saved {cat} figure to {save_path}")
+        plt.close(fig)

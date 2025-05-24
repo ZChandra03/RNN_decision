@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
-pca.py
+scree_failure_analysis.py
 
-Revised PCA‑based inspection for TP / FP / FN / TN hidden states.
-
-Key change:
-- **Covariance PCA**: center only (Xc = X - mean), no z-scoring by std,
-  so `PCA.fit` operates on the covariance matrix rather than correlation.
+Automatically load the trained model, generate trials, extract hidden-state averages,
+perform full PCA, and plot a scree plot (\u03bb_j vs j).
 
 Usage:
-    python pca.py
+    python scree_failure_analysis.py
 
 Outputs:
-    - pca_scatter.png and pca_variance.png in OUTPUT_DIR
+    - scree_plot.png in OUTPUT_DIR
 """
+
 import os
 import json
 import numpy as np
@@ -29,27 +27,26 @@ from failure_count import generate_case_batch
 # ────────────────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.abspath(os.path.dirname(__file__))
 MODEL_DIR  = os.path.join(BASE_DIR, "models", "easy_trained")
-OUTPUT_DIR = os.path.join(BASE_DIR, "pca_failure_analysis")
+OUTPUT_DIR = os.path.join(BASE_DIR, "scree_failure_analysis")
 
-# Analysis hyper‑params
-BATCH_SIZE = 1000
-THRESHOLD  = 0.4
-PCA_NCOMP  = 10
-WINDOW_MS  = 200
+# Analysis parameters
+BATCH_SIZE = 400    # trials per duration/order block
+WINDOW_MS  = 200    # averaging window after 2nd interval offset
+PCA_MAX    = None   # keep all components
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ────────────────────────────────────────────────────────────────────────────
-# Helper functions
+# Helpers
 # ────────────────────────────────────────────────────────────────────────────
+
 def load_model(model_dir):
     with open(os.path.join(model_dir, "hp.json"), "r") as f:
         hp = json.load(f)
     model = RNNModel(hp)
     ckpt = torch.load(os.path.join(model_dir, "checkpoint.pt"), map_location="cpu")
     model.load_state_dict(ckpt)
-    model.to(DEVICE).eval()
+    model.to(device).eval()
     return model, hp
 
 
@@ -66,62 +63,57 @@ def average_hidden_window(h_seq, int2_ons, dt, window_ms):
 # ────────────────────────────────────────────────────────────────────────────
 # Main
 # ────────────────────────────────────────────────────────────────────────────
+
 def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     model, hp = load_model(MODEL_DIR)
     dt = hp.get("dt", 10)
 
-    # Only focus on durations that show failures
-    comp_durs = [180, 220]
+    # derive comparison durations
+    if "comp_step" in hp:
+        offsets = [-4, -3, -2, -1, 1, 2, 3, 4]
+        comp_durs = [hp["std_dur"] + o * hp["comp_step"] for o in offsets]
+    else:
+        comp_durs = [120, 140, 160, 180, 220, 240, 260, 280]
     orders = [0, 1]
 
-    X_list, labels = [], []
+    # collect all hidden-state averages
+    X_list = []
     for d in comp_durs:
         for o in orders:
             x, responds, int2_ons = generate_case_batch(hp, d, o, BATCH_SIZE)
             with torch.no_grad():
-                h_seq = model.rnn(x.to(DEVICE))
-            # classify
-            yhat = model(x.to(DEVICE)).cpu().squeeze(-1)
-            fired = (yhat > THRESHOLD)
-            fired_in = (fired & (torch.arange(yhat.size(1))[None,:] >= int2_ons.unsqueeze(1))).any(1)
-            resp = responds
-            lbl = np.where(resp & fired_in, 'TP', np.where(~resp & fired.any(1), 'FP', np.where(resp & ~fired_in, 'FN', 'TN')))
-            # average hidden
+                h_seq = model.rnn(x.to(device))
             h_avg = average_hidden_window(h_seq, int2_ons, dt, WINDOW_MS)
             X_list.append(h_avg)
-            labels.append(lbl)
-            print(f"d={d}, order={o} -> ", {tuple(np.unique(lbl, return_counts=True))})
+            print(f"Collected hidden averages for d={d}, order={o}")
 
     X = np.vstack(X_list)  # shape (n_trials, n_units)
-    y = np.concatenate(labels)
-
-    # **Covariance PCA**: center only
+    # standardize per feature
     Xc = X - X.mean(axis=0)
-    pca = PCA(n_components=PCA_NCOMP, svd_solver='full')
-    Z = pca.fit_transform(Xc)
 
-    # scatter
-    colours = {'TP':'g','FP':'orange','FN':'r','TN':'b'}
-    plt.figure(figsize=(6,5))
-    for c in colours:
-        sel = (y == c)
-        plt.scatter(Z[sel,0], Z[sel,1], s=12, alpha=0.7, c=colours[c], label=c)
-    plt.xlabel('PC-1'); plt.ylabel('PC-2')
-    plt.title('Hidden-state Covariance-PCA')
-    plt.legend(); plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR,'pca_scatter.png'), dpi=300)
+    # PCA
+    pca = PCA(n_components=PCA_MAX, svd_solver='full')
+    pca.fit(Xc)
+    eigvals = pca.explained_variance_
+
+    n = 30
+    # Scree plot
+    plt.figure(figsize=(6,4))
+    j = np.arange(1, len(eigvals)+1)
+    plt.plot(j[:n], eigvals[:n], 'o-', markersize=5)
+    print(eigvals[:n])
+    plt.xlabel('Principal component index $j$')
+    plt.ylabel(r'Eigenvalue $\lambda_j$')
+    plt.title('PCA Scree Plot')
+    plt.grid(True)
+    plt.tight_layout()
+    out_file = os.path.join(OUTPUT_DIR, 'scree_plot.png')
+    plt.savefig(out_file, dpi=300)
     plt.close()
 
-    # cumulative variance
-    cumvar = np.cumsum(pca.explained_variance_ratio_)*100
-    plt.figure(figsize=(4,3))
-    plt.plot(np.arange(1,len(cumvar)+1), cumvar,'o-')
-    plt.xlabel('PC index j'); plt.ylabel('Cumulative variance (%)')
-    plt.title('Covariance PCA variance')
-    plt.grid(True); plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR,'pca_variance.png'), dpi=300)
-    plt.close()
-    print(f"Saved plots to {OUTPUT_DIR}")
+    print(f"✓ Scree plot saved to {out_file}")
+
 
 if __name__ == '__main__':
     main()

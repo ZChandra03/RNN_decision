@@ -129,7 +129,7 @@ if __name__ == "__main__":
     results = []
     for d in durations:
         for o in orders:
-            x, resp, int2 = generate_case_batch(hp, d, o, BATCH_SIZE)
+            x, resp, int2, _ = generate_case_batch(hp, d, o, BATCH_SIZE)
             counts = classify_counts(model, x, resp, int2, THRESHOLD)
             results.append([counts[0], counts[1], counts[2], counts[3]])
             print(f"d={d}, order={o} → TP,FP,FN,TN = {counts}")

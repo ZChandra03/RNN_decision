@@ -33,11 +33,11 @@ plt.plot(times_ms, trial.c_mask[0, :, 0], label='mask_original', linestyle='--',
 
 # Draw Int2 onset
 t_int2_on = int(trial.int2_ons[0]) * trial.dt
-plt.axvline(t_int2_on, color='C0', linestyle='--', label=f'Int2 onset @ {t_int2_on} ms')
+#plt.axvline(t_int2_on, color='C0', linestyle='--', label=f'Int2 onset @ {t_int2_on} ms')
 
 # Draw Int2 offset
 t_int2_off = int(trial.int2_offs[0]) * trial.dt
-plt.axvline(t_int2_off, color='C1', linestyle='-.', label=f'Int2 offset @ {t_int2_off} ms')
+#plt.axvline(t_int2_off, color='C1', linestyle='-.', label=f'Int2 offset @ {t_int2_off} ms')
 
 plt.xlabel('Time (ms)')
 plt.legend(loc='upper right')

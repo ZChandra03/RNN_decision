@@ -116,12 +116,12 @@ def plot_activation_heatmap(mean_pos: np.ndarray, mean_neg: np.ndarray,
 # -----------------------------------------------------------------------------
 
 def main():
-    model_dir = os.path.join(BASE_DIR, "models", "seed_100")
-    dataset_size = 1000
+    model_dir = os.path.join(BASE_DIR, "models", "easy_trained")
+    dataset_size = 10000
     top          = 20
     comp_step    = 20
     out          = "dprimeEasyTask1.png"
-    model_name   = 'model2'
+    model_name   = os.path.basename(model_dir.rstrip(os.sep))
     base_name    = os.path.splitext(out)[0]
     out_filename = f"{base_name}_{model_name}.png"
     out_path     = os.path.join(BASE_DIR, out_filename)
@@ -132,14 +132,14 @@ def main():
     dp, mean_pos, mean_neg = selectivity_by_decision(model, x, mask, labels)
 
     # ─── Save d-prime & activation arrays for downstream analysis ───
-    results_fname = f"results_{model_name}.npz"
-    results_path  = os.path.join(BASE_DIR, results_fname)
-    np.savez(
-        results_path,
-        dprime=dp,
-        activation=(mean_pos + mean_neg) / 2.0
-    )
-    print(f"[INFO] Saved analysis results to {results_path}")
+    # results_fname = f"results_{model_name}.npz"
+    # results_path  = os.path.join(BASE_DIR, results_fname)
+    # np.savez(
+    #     results_path,
+    #     dprime=dp,
+    #     activation=(mean_pos + mean_neg) / 2.0
+    # )
+    # print(f"[INFO] Saved analysis results to {results_path}")
 
     plot_dprime(dp, out_path, model_name, top=top)
     plot_activation_heatmap(mean_pos, mean_neg, dp, out_path, model_name)

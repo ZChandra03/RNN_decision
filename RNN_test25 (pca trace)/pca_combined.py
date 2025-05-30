@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-Animated PCA scatter‑plot of RNN hidden states *without* temporal averaging.
+Animated PCA scatter-plot of RNN hidden states *without* temporal averaging.
+Now also saves a **static mean‑trajectory plot** on PC‑1 vs PC‑2 for every
+(order, comparison‑duration) condition present in the dataset.
 
-Key improvements (2025‑05‑24):
-• **save_stills now works** – added a private helper `_scatter()` and wired the
-  function into `main()` so you can request individual PNG frames via
-  `SAVE_FRAMES_MS`.
-• `save_gif()` always saves into the script folder (was already true but
-  clarified in a comment).
-• Guarded all optional features so nothing breaks when you leave lists empty.
-• No other logic touched – GIF export, PyQt5 live window, dataset generation,
-  PCA computation all behave exactly as before.
-
-Run:
+Usage (unchanged):
     python pca_animation_pointwise.py
 
-Dependencies: torch, numpy, scikit‑learn, PyQt5, matplotlib, Pillow.
+Key additions (2025‑05‑29):
+• build_dataset() now returns a *groups* list with (order, dur) per trial.
+• Added plot_mean_trajectories() that averages PC‑scores over trials within
+  each group and dumps a PNG with one poly‑line per condition.
+• New constant MEAN_PLOT_OUT controls output filename (set empty string to
+  disable).
+All previous functionality (GIF export, PNG stills, live PyQt5 window) works
+exactly as before.
 """
 
 import os, sys, json
 import numpy as np
 import torch
+from collections import defaultdict  # NEW
 from sklearn.decomposition import PCA
 
 # GUI and plotting -----------------------------------------------------------
@@ -32,27 +32,27 @@ import matplotlib.animation as animation
 from matplotlib.animation import PillowWriter
 
 # Project‑level modules -------------------------------------------------------
-from rnn_model     import RNNModel
-from generate_trials import generate_case_batch
+from rnn_model         import RNNModel
+from generate_trials   import generate_case_batch
 
 # ---------------- User‑tweakable params ------------------------------------
 START_MS = -200       # clip start (ms relative to int‑2 offset)
-END_MS   =  1500       # clip end   (ms relative to int‑2 offset)
+END_MS   =  1500      # clip end   (ms relative to int‑2 offset)
 
 # List of frame times (ms) relative to int‑2 offset for which to save a PNG.
-# Empty list ⇒ no stills will be written.
-SAVE_FRAMES_MS = []   # e.g. [‑200, 0, 200]
+SAVE_FRAMES_MS = []   # Empty list ⇒ no stills written
 
-OUT_GIF  = f"pca_pointwise{START_MS}_{END_MS}.gif"
-FPS      = 10
+OUT_GIF        = f"pca_pointwise{START_MS}_{END_MS}.gif"
+MEAN_PLOT_OUT  = "mean_trajectories_pc12.png"   # ← NEW ("" to skip)
+FPS            = 10
 
 # ---------------- Constants -------------------------------------------------
 BASE_DIR   = os.path.abspath(os.path.dirname(__file__))
 MODEL_DIR  = os.path.join(BASE_DIR, "models", "easy_trained")
 DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 1000
-COMP_DURS  = [120,140,160,180, 220, 240, 260, 280]
-ORDERS     = [0,1]
+BATCH_SIZE = 100
+COMP_DURS  = [120,140,160,180, 220,240,260,280]
+ORDERS     = [1]
 THRESHOLD  = 0.4
 PCA_NCOMP  = 10
 COLOUR_MAP = {
@@ -84,7 +84,15 @@ def classify_trial(y_pred, int2_on, responds):
 
 
 def build_dataset(model, hp):
-    """Generate trials, align on int‑2 onset and return raw hidden states."""
+    """Generate trials, align on int‑2 onset and return raw hidden states.
+
+    Returns
+    -------
+    h_cl   : torch.Tensor  (trials, L, N)
+    colours: list[str]     per trial
+    times  : np.ndarray    shape (L,)
+    groups : list[tuple]   (order, comp_dur) per trial  ← NEW
+    """
     dt = hp["dt"]
     batches, min_pre, min_post = [], np.inf, np.inf
 
@@ -99,26 +107,27 @@ def build_dataset(model, hp):
             post = h.shape[1] - pre                # samples after int‑2 per trial
             min_pre  = min(min_pre,  pre.min())
             min_post = min(min_post, post.min())
-            batches.append((h, y, int2, resp))
+            batches.append((h, y, int2, resp, dur, order))      # store meta
 
     min_pre, min_post = int(min_pre), int(min_post)
 
-    # 2) Clip every trial to the common window and collect colours
-    clipped, colours = [], []
-    for h, y, int2, resp in batches:
+    # 2) Clip every trial to the common window and collect colours / groups
+    clipped, colours, groups = [], [], []
+    for h, y, int2, resp, dur, order in batches:
         for i in range(h.shape[0]):
             s = int(int2[i]) - min_pre               # inclusive start idx
             e = int(int2[i]) + min_post              # exclusive end idx
             clipped.append(h[i, s:e])               # (L,N)
             lbl = classify_trial(y[i], int2[i], bool(resp[i]))
             colours.append(COLOUR_MAP[lbl])
+            groups.append((order, dur))              # NEW
 
     h_cl   = torch.stack(clipped)      # (trials, L, N)
     frames = h_cl.shape[1]
     int2_idx = min_pre                 # aligned offset index inside window
     times  = (np.arange(frames) - int2_idx) * dt
 
-    return h_cl.numpy(), colours, times
+    return h_cl.numpy(), colours, times, groups
 
 
 def compute_pca(h):
@@ -144,7 +153,40 @@ def _scatter(ax, Z, colours, frame_idx, true_idx, false_idx, title):
         title=title,
     )
 
+# ---------------- NEW: static mean‑trajectory plot -------------------------
+
+def plot_mean_trajectories(Z, groups, out_file):
+    """Save a static plot of mean PC‑trajectories for each (order, dur)."""
+    if not out_file:
+        return
+    # Gather per‑group arrays of shape (trials_in_group, L, 2)
+    buckets = defaultdict(list)
+    for idx, grp in enumerate(groups):
+        buckets[grp].append(Z[idx, :, :2])  # keep PC‑1 & PC‑2 only
+    # Compute means
+    means = {g: np.mean(np.stack(arrs), axis=0) for g, arrs in buckets.items()}
+
+    # Consistent colour palette
+    palette = plt.cm.get_cmap("tab20", len(means))
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    for i, ((order, dur), traj) in enumerate(sorted(means.items())):
+        ax.plot(traj[:, 0], traj[:, 1], label=f"ord{order}-dur{dur}",
+                linewidth=2, alpha=0.8, color=palette(i))
+    ax.set(
+        xlabel="PC‑1", ylabel="PC‑2", title="Mean trajectories (PC‑space)",
+        xlim=(Z[:, :, 0].min() * 1.1, Z[:, :, 0].max() * 1.1),
+        ylim=(Z[:, :, 1].min() * 1.1, Z[:, :, 1].max() * 1.1),
+    )
+    ax.legend(fontsize="small", ncol=2)
+    fig.tight_layout()
+    out_path = os.path.join(BASE_DIR, out_file)
+    fig.savefig(out_path, dpi=300)
+    plt.close(fig)
+    print(f"✓ Saved mean‑trajectory plot → {out_path}")
+
 # ---------------- GIF export ------------------------------------------------
+# (unchanged except for minor style tweaks)
 
 def save_gif(Z, colours, times, filename, fps):
     """Save animated GIF (optional – skip if *filename* is falsy)."""
@@ -202,6 +244,7 @@ def save_stills(Z, colours, times, save_ms):
         print(f"✓ Saved {fname}")
 
 # ---------------- PyQt5 interactive window ---------------------------------
+# (unchanged)
 class PCAScatterWindow(QMainWindow):
     def __init__(self, Z, colours, times):
         super().__init__()
@@ -243,7 +286,7 @@ class PCAScatterWindow(QMainWindow):
 
 def main():
     model, hp = load_model(MODEL_DIR)
-    h_raw, colours, times = build_dataset(model, hp)
+    h_raw, colours, times, groups = build_dataset(model, hp)  # NEW groups
     Z = compute_pca(h_raw)
 
     # Optional clip for START_MS / END_MS
@@ -256,13 +299,16 @@ def main():
     Z_sub     = Z[:, mask]
     times_sub = times[mask]
 
-    # 1) Optional GIF export
+    # 0) NEW: static mean‑trajectory plot ----------------------------------
+    plot_mean_trajectories(Z_sub, groups, MEAN_PLOT_OUT)
+
+    # 1) Optional GIF export ------------------------------------------------
     save_gif(Z_sub, colours, times_sub, OUT_GIF, FPS)
 
-    # 2) Optional still export
+    # 2) Optional still export ---------------------------------------------
     save_stills(Z_sub, colours, times_sub, SAVE_FRAMES_MS)
 
-    # 3) Live PyQt5 window
+    # 3) Live PyQt5 window --------------------------------------------------
     app = QApplication(sys.argv)
     win = PCAScatterWindow(Z_sub, colours, times_sub)
     win.setWindowTitle(f"Animated PCA scatter (N = {Z_sub.shape[0]})")

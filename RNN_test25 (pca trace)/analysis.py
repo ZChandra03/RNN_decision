@@ -83,7 +83,6 @@ def plot_dprime(dp: np.ndarray, out_path: str, model_name: str, top: int = 20):
     sorted_dp = dp[idx]
     plt.figure(figsize=(10, 4))
     plt.bar(range(len(sorted_dp)), sorted_dp, width=1.0)
-    plt.ylim(-40, 40)
     plt.xlabel("Neuron (sorted by |d′|)")
     plt.ylabel("d′ (d-prime)")
     plt.title(f"Hidden-unit decision d' ({model_name})")
@@ -95,42 +94,34 @@ def plot_dprime(dp: np.ndarray, out_path: str, model_name: str, top: int = 20):
 def plot_activation_heatmap(mean_pos: np.ndarray, mean_neg: np.ndarray,
                             dp: np.ndarray, out_path: str, model_name: str):
     idx = np.argsort(-np.abs(dp))
-    data = np.vstack([mean_pos[idx], mean_neg[idx]])  # shape (2, N)
-
-    # ─── Min–max normalize to [0,1] ───
-    data_min = data.min()
-    data_max = data.max()
-    data_norm = (data - data_min) / (data_max - data_min + EPS)
+    data = np.vstack([mean_pos[idx], mean_neg[idx]])  # (2, N)
 
     fig, ax = plt.subplots(figsize=(10, 2))
-    im = ax.imshow(data_norm, aspect='auto', cmap='seismic', vmin=0, vmax=1)
-
+    vmax = np.max(np.abs(data))
+    im = ax.imshow(data, aspect='auto', cmap='seismic', vmin=0, vmax=vmax)
     ax.set_yticks([0, 1])
     ax.set_yticklabels(['Respond1', 'Respond0'])
     ax.set_xticks([])
     ax.set_title(f'Mean activation during decision window ({model_name})')
-
     cbar = fig.colorbar(im, ax=ax, orientation='horizontal', pad=0.3)
-    cbar.set_label('Normalized activation (0 → min, 1 → max)')
-
+    cbar.set_label('Activation')
     heatmap_path = out_path.replace('.png', f'_{model_name}_activation_heatmap.png')
     fig.tight_layout()
     fig.savefig(heatmap_path, dpi=300)
     plt.close(fig)
     print(f"Heatmap saved to {heatmap_path}")
 
-
 # -----------------------------------------------------------------------------
 # Entry point
 # -----------------------------------------------------------------------------
 
 def main():
-    model_dir = os.path.join(BASE_DIR, "models", "seed_100")
-    dataset_size = 1000
+    model_dir = os.path.join(BASE_DIR, "models", "easy_trained")
+    dataset_size = 10000
     top          = 20
     comp_step    = 20
     out          = "dprimeEasyTask1.png"
-    model_name   = 'model2'
+    model_name   = os.path.basename(model_dir.rstrip(os.sep))
     base_name    = os.path.splitext(out)[0]
     out_filename = f"{base_name}_{model_name}.png"
     out_path     = os.path.join(BASE_DIR, out_filename)
@@ -141,14 +132,14 @@ def main():
     dp, mean_pos, mean_neg = selectivity_by_decision(model, x, mask, labels)
 
     # ─── Save d-prime & activation arrays for downstream analysis ───
-    results_fname = f"results_{model_name}.npz"
-    results_path  = os.path.join(BASE_DIR, results_fname)
-    np.savez(
-        results_path,
-        dprime=dp,
-        activation=(mean_pos + mean_neg) / 2.0
-    )
-    print(f"[INFO] Saved analysis results to {results_path}")
+    # results_fname = f"results_{model_name}.npz"
+    # results_path  = os.path.join(BASE_DIR, results_fname)
+    # np.savez(
+    #     results_path,
+    #     dprime=dp,
+    #     activation=(mean_pos + mean_neg) / 2.0
+    # )
+    # print(f"[INFO] Saved analysis results to {results_path}")
 
     plot_dprime(dp, out_path, model_name, top=top)
     plot_activation_heatmap(mean_pos, mean_neg, dp, out_path, model_name)
